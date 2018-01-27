@@ -1,7 +1,12 @@
-# bitcoin-normalize-transactions
+# bitcoin-denormalize-transactions
 Consumes bitcoin blk*.dat files and produces (from_address, to_address, amount, time) tuples
 
-# TODO
+## Dependencies
+
+* Fetch test block data `./fetch_test_data.sh`
+* https://github.com/alecalve/python-bitcoin-blockchain-parser
+
+## TODO
 
 * Deduce input addresses. An input appears to be a reference to an output of a previous transaction:
 ```
