@@ -3,4 +3,4 @@ Consumes bitcoin blk*.dat files and produces (from_address, to_address, amount, 
 
 # TODO
 
-[ ] Everything
+* Everything
