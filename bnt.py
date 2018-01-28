@@ -12,12 +12,12 @@ if result == None:
     
     print("Creating unspent_outputs table...")
     c.execute('''CREATE TABLE unspent_outputs
-                 (tx_hash text, output_number int, address text, amount text)''')
+                 (tx_hash text, output_number int, address text, amount int)''')
     c.execute('CREATE UNIQUE INDEX tx_output ON unspent_outputs (tx_hash, output_number);')
 
     print("Creating balances table...")
     c.execute('''CREATE TABLE balances
-                 (time text, address text, amount text)''')
+                 (time text, address text, amount int)''')
     c.execute('CREATE UNIQUE INDEX point ON balances (time, address);')
 
 def commit_db_and_exit():
@@ -35,7 +35,6 @@ signal.signal(signal.SIGINT, signal_handler)
 insertions_since_last_commit = 0
 total_outputs_inserted = 0
 def store_output(timestamp, tx_hash, output_number, _output):
-    # print(timestamp.timestamp())
     global insertions_since_last_commit
     global total_outputs_inserted
     # don't know how to handle outputs mentioning more than 1 address at the moment
@@ -48,11 +47,15 @@ def store_output(timestamp, tx_hash, output_number, _output):
         # update balance of address
         c.execute('SELECT * FROM balances WHERE address = ? ORDER BY time DESC LIMIT 1', (address,))
         result = c.fetchone()
+        new_amount = 0
         if result != None:
             print("Found previous balance %s" % (result,))
-            print("TODO: cumulate new balance")
-        else:
-            c.execute('INSERT INTO balances VALUES(?, ?, ?)', (timestamp.isoformat(), address, _output.value))
+            new_amount = result[2] + _output.value
+
+            if result[0] == timestamp.isoformat():
+                c.execute('DELETE FROM balances WHERE time = ? AND address = ?', (timestamp.isoformat(), address))
+                
+        c.execute('INSERT INTO balances VALUES(?, ?, ?)', (timestamp.isoformat(), address, new_amount))
 
         insertions_since_last_commit = insertions_since_last_commit + 1
         if insertions_since_last_commit > 10000:
@@ -87,6 +90,7 @@ def get_number_of_unspent_outputs():
 tx_index = 0
 blockchain = Blockchain(sys.argv[1])
 for block in blockchain.get_unordered_blocks():
+    print("block: %s" % (block.header.timestamp.isoformat(),))
     for tx in block.transactions:
 
         # example input referencing a previous output
