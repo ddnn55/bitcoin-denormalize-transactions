@@ -1,5 +1,6 @@
 import sys
 from blockchain_parser.blockchain import Blockchain
+from operator import attrgetter
 
 import sqlite3
 
@@ -49,13 +50,18 @@ def store_output(timestamp, tx_hash, output_number, _output):
         result = c.fetchone()
         new_amount = 0
         if result != None:
-            print("Found previous balance %s" % (result,))
+            # print("Found previous balance %s" % (result,))
             new_amount = result[2] + _output.value
 
             if result[0] == timestamp.isoformat():
                 c.execute('DELETE FROM balances WHERE time = ? AND address = ?', (timestamp.isoformat(), address))
-                
-        c.execute('INSERT INTO balances VALUES(?, ?, ?)', (timestamp.isoformat(), address, new_amount))
+
+        try:
+            c.execute('INSERT INTO balances VALUES(?, ?, ?)', (timestamp.isoformat(), address, new_amount))
+        except sqlite3.IntegrityError as e:
+            print(e)
+            print("while trying to insert %s" % ((timestamp.isoformat(), address, new_amount),))
+            commit_db_and_exit()
 
         insertions_since_last_commit = insertions_since_last_commit + 1
         if insertions_since_last_commit > 10000:
@@ -89,8 +95,10 @@ def get_number_of_unspent_outputs():
 # containing the .blk files created by bitcoind
 tx_index = 0
 blockchain = Blockchain(sys.argv[1])
-for block in blockchain.get_unordered_blocks():
+blocks = sorted(list(blockchain.get_unordered_blocks()), key=attrgetter('header.timestamp'))
+for block in blocks:
     print("block: %s" % (block.header.timestamp.isoformat(),))
+
     for tx in block.transactions:
 
         # example input referencing a previous output
