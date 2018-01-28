@@ -18,8 +18,8 @@ if result == None:
 
     print("Creating balances table...")
     c.execute('''CREATE TABLE balances
-                 (time text, address text, amount int)''')
-    c.execute('CREATE UNIQUE INDEX point ON balances (time, address);')
+                 (address text, amount int)''')
+    c.execute('CREATE UNIQUE INDEX point ON balances (address);')
 
 def commit_db_and_exit():
     conn.commit()
@@ -46,22 +46,23 @@ def store_output(timestamp, tx_hash, output_number, _output):
         total_outputs_inserted = total_outputs_inserted + 1
 
         # update balance of address
-        c.execute('SELECT * FROM balances WHERE address = ? ORDER BY time DESC LIMIT 1', (address,))
+        c.execute('SELECT * FROM balances WHERE address = ?', (address,))
         result = c.fetchone()
+        # print(result)
         new_amount = 0
         if result != None:
             # print("Found previous balance %s" % (result,))
-            new_amount = result[2] + _output.value
+            new_amount = result[1] + _output.value
 
-            if result[0] == timestamp.isoformat():
-                c.execute('DELETE FROM balances WHERE time = ? AND address = ?', (timestamp.isoformat(), address))
-
-        try:
-            c.execute('INSERT INTO balances VALUES(?, ?, ?)', (timestamp.isoformat(), address, new_amount))
-        except sqlite3.IntegrityError as e:
-            print(e)
-            print("while trying to insert %s" % ((timestamp.isoformat(), address, new_amount),))
-            commit_db_and_exit()
+            # if result[0] == timestamp.isoformat():
+            c.execute('UPDATE balances SET amount = ? WHERE address = ?', (new_amount, address))
+        else:
+            try:
+                c.execute('INSERT INTO balances VALUES(?, ?)', (address, new_amount))
+            except sqlite3.IntegrityError as e:
+                print(e)
+                print("while trying to insert %s" % ((address, new_amount),))
+                commit_db_and_exit()
 
         insertions_since_last_commit = insertions_since_last_commit + 1
         if insertions_since_last_commit > 10000:
@@ -76,12 +77,14 @@ def store_output(timestamp, tx_hash, output_number, _output):
     else:
         print("multi address output")
         print(_output.addresses)
+        print("don't know how to handle that, quitting")
         commit_db_and_exit()
 
 def process_input(_input):
     # print(_input)
     c.execute('SELECT address, amount FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index))
     result = c.fetchone()
+    # print(result)
     if result != None:
         # print("Found %s" % (result,))
         # an output can only be spent through an input once! we can remove this row!
@@ -89,15 +92,17 @@ def process_input(_input):
 
 def get_number_of_unspent_outputs():
     c.execute('SELECT COUNT(*) FROM unspent_outputs')
-    return c.fetchone()[0]
+    result = c.fetchone()[0]
+    # print(result)
+    return result
 
 # Instantiate the Blockchain by giving the path to the directory 
 # containing the .blk files created by bitcoind
 tx_index = 0
 blockchain = Blockchain(sys.argv[1])
 blocks = sorted(list(blockchain.get_unordered_blocks()), key=attrgetter('header.timestamp'))
-for block in blocks:
-    print("block: %s" % (block.header.timestamp.isoformat(),))
+for block_number, block in enumerate(blocks):
+    print("block %s / %s: %s" % (block_number, len(blocks), block.header.timestamp.isoformat(),))
 
     for tx in block.transactions:
 
