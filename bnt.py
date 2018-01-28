@@ -4,14 +4,21 @@ from blockchain_parser.blockchain import Blockchain
 import sqlite3
 
 conn = sqlite3.connect('book.sqlite3')
+# conn = sqlite3.connect(':memory:')
 c = conn.cursor()
 c.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='unspent_outputs';''')
 result = c.fetchone()
 if result == None:
-    print("Creating table...")
+    
+    print("Creating unspent_outputs table...")
     c.execute('''CREATE TABLE unspent_outputs
                  (tx_hash text, output_number int, address text, amount text)''')
     c.execute('CREATE UNIQUE INDEX tx_output ON unspent_outputs (tx_hash, output_number);')
+
+    print("Creating balances table...")
+    c.execute('''CREATE TABLE balances
+                 (time text, address text, amount text)''')
+    c.execute('CREATE UNIQUE INDEX point ON balances (time, address);')
 
 def commit_db_and_exit():
     conn.commit()
@@ -27,13 +34,26 @@ signal.signal(signal.SIGINT, signal_handler)
 
 insertions_since_last_commit = 0
 total_outputs_inserted = 0
-def store_output(tx_hash, output_number, _output):
+def store_output(timestamp, tx_hash, output_number, _output):
+    # print(timestamp.timestamp())
     global insertions_since_last_commit
     global total_outputs_inserted
     # don't know how to handle outputs mentioning more than 1 address at the moment
     if len(_output.addresses) == 1:
-        c.execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?)', (tx_hash, output_number, _output.addresses[0].address, _output.value))
+        address = _output.addresses[0].address
+
+        c.execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?)', (tx_hash, output_number, address, _output.value))
         total_outputs_inserted = total_outputs_inserted + 1
+
+        # update balance of address
+        c.execute('SELECT * FROM balances WHERE address = ? ORDER BY time DESC LIMIT 1', (address,))
+        result = c.fetchone()
+        if result != None:
+            print("Found previous balance %s" % (result,))
+            print("TODO: cumulate new balance")
+        else:
+            c.execute('INSERT INTO balances VALUES(?, ?, ?)', (timestamp.isoformat(), address, _output.value))
+
         insertions_since_last_commit = insertions_since_last_commit + 1
         if insertions_since_last_commit > 10000:
             conn.commit()
@@ -94,7 +114,7 @@ for block in blockchain.get_unordered_blocks():
         # in the long run, e.g. even after everything is spent
         
         for no, output in enumerate(tx.outputs):
-            store_output(tx.hash, no, output)
+            store_output(block.header.timestamp, tx.hash, no, output)
             # print("tx=%s outputno=%d type=%s value=%s" % (tx.hash, no, output.addresses, output.value))
         
         tx_index = tx_index + 1
