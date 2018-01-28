@@ -15,9 +15,20 @@ if result == None:
 
 def store_output(tx_hash, output_number, _output):
     # don't know how to handle outputs mentioning more than 1 address at the moment
-    assert(len(_output.addresses) == 1)
-
-    c.execute('INSERT INTO outputs VALUES(?, ?, ?)', (tx_hash, output_number, _output.addresses[0].address))
+    if len(_output.addresses) == 1:
+        c.execute('INSERT INTO outputs VALUES(?, ?, ?)', (tx_hash, output_number, _output.addresses[0].address))
+    elif len(_output.addresses) == 0:
+        print("Info: 0 address output. tx=%s output_number=%s output=%s" % (tx_hash, output_number, _output))
+        if _output.value != 0:
+            print("...of value = %s satoshis" % (_output.value))
+            print("...quitting, we should handle this right?")
+            exit()
+        else:
+            print("...of value 0")
+    else:
+        print("multi address output")
+        print(_output.addresses)
+        exit()
 
 def lookup_address_of_input(_input):
     # print(_input)
