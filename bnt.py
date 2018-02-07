@@ -6,8 +6,8 @@ from operator import attrgetter
 
 import sqlite3
 
-conn = sqlite3.connect('book.sqlite3')
-# conn = sqlite3.connect(':memory:')
+# conn = sqlite3.connect('book.sqlite3')
+conn = sqlite3.connect(':memory:')
 c = conn.cursor()
 c.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='unspent_outputs';''')
 result = c.fetchone()
@@ -81,13 +81,16 @@ def process_transfer(destination_address, value, tx_hash, output_number):
 
 # some outputs of value have zero addresses.
 # will credit them to unique "dev null" pseudo-addresses.
-def devnull_address():
+def make_devnull_address_generator():
     n = 0
     while True:
         yield "devnull_" + str(n).zfill(10)
         n = n + 1
+devnull_address = make_devnull_address_generator()
 
 def process_output(timestamp, tx_hash, output_number, _output):
+
+    global devnull_address
 
     # don't know how to handle outputs mentioning more than 1 address at the moment
     if len(_output.addresses) == 1:
@@ -97,7 +100,7 @@ def process_output(timestamp, tx_hash, output_number, _output):
         if _output.value != 0:
             print("Info: 0 address output. tx=%s output_number=%s output=%s" % (tx_hash, output_number, _output))
             print("...of value = %s satoshis" % (_output.value))
-            pseudo_address = devnull_address()
+            pseudo_address = next(devnull_address)
             print("...crediting to " + pseudo_address + " LOL")
             process_transfer(pseudo_address, _output.value, tx_hash, output_number)
             # print("...quitting, we should handle this right?")
