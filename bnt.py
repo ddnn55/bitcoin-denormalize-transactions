@@ -133,18 +133,26 @@ def get_number_of_unspent_outputs():
 tx_index = 0
 print("Initializing blockchain at " + sys.argv[1])
 blockchain = Blockchain(sys.argv[1])
-print("Iniitialized. Loading blocks...")
+print("Initialized. Loading blocks...")
 unordered_blocks = []
 for b, block in enumerate(blockchain.get_unordered_blocks()):
     unordered_blocks.append(block)
-    print("Loaded " + str(b) + " blocks", end="\r")
-print("Loaded all blocks. Sorting by time...")
+    if b % 1000 == 0:
+        print("Loaded " + str(b) + " blocks", end="\r")
+total_blocks = len(unordered_blocks)
+print("Loaded all " + str(total_outputs_inserted) + " blocks. Sorting by time...")
 blocks = sorted(unordered_blocks, key=attrgetter('header.timestamp'))
 print("Sorted.")
+
+tx_count = 0
+output_count = 0
+
 for block_number, block in enumerate(blocks):
     # print("block %s / %s: %s" % (block_number, len(blocks), block.header.timestamp.isoformat(),))
 
     for tx in block.transactions:
+
+        tx_count = tx_count + 1
 
         # example input referencing a previous output
         #
@@ -171,6 +179,7 @@ for block_number, block in enumerate(blocks):
         # in the long run, e.g. even after everything is spent
         
         for no, output in enumerate(tx.outputs):
+            output_count = output_count + 1
             if tx.hash == "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599":
                 print("processing tx d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599 output #" + str(no))
             process_output(block.header.timestamp, tx.hash, no, output)
@@ -178,4 +187,7 @@ for block_number, block in enumerate(blocks):
         
         tx_index = tx_index + 1
         if tx_index % 1000 == 0:
-            print("unspent outputs %s / %s total outputs" % (get_number_of_unspent_outputs(), total_outputs_inserted))
+            percent = round(100 * block_number / total_blocks)
+            print("%s%% done. unspent outputs %s / %s total outputs" % (percent, get_number_of_unspent_outputs(), total_outputs_inserted), end="\r")
+
+print("Processed %s transactions and %s outputs." % (tx_count, output_count))
