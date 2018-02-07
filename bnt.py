@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 from blockchain_parser.blockchain import Blockchain
 from operator import attrgetter
@@ -33,52 +35,79 @@ def signal_handler(signal, frame):
 
 signal.signal(signal.SIGINT, signal_handler)
 
+
+
 insertions_since_last_commit = 0
 total_outputs_inserted = 0
-def store_output(timestamp, tx_hash, output_number, _output):
+
+def process_transfer(destination_address, value, tx_hash, output_number):
     global insertions_since_last_commit
     global total_outputs_inserted
+
+    address = destination_address
+
+    row = (tx_hash, output_number, address, value)
+    try:
+        c.execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?)', row)
+    except sqlite3.IntegrityError as e:
+        print(e)
+        print("WARNING: ignoring transaction with duplicate hash. should be extremely rare. see https://bitcoin.stackexchange.com/questions/11999/can-the-outputs-of-transactions-with-duplicate-hashes-be-spent")
+        print(row)
+    total_outputs_inserted = total_outputs_inserted + 1
+
+    # update balance of address
+    c.execute('SELECT * FROM balances WHERE address = ?', (address,))
+    result = c.fetchone()
+    # print(result)
+    new_amount = 0
+    if result != None:
+        # print("Found previous balance %s" % (result,))
+        new_amount = result[1] + value
+
+        # if result[0] == timestamp.isoformat():
+        c.execute('UPDATE balances SET amount = ? WHERE address = ?', (new_amount, address))
+    else:
+        try:
+            c.execute('INSERT INTO balances VALUES(?, ?)', (address, new_amount))
+        except sqlite3.IntegrityError as e:
+            print(e)
+            print("while trying to insert %s" % ((address, new_amount),))
+            commit_db_and_exit()
+
+    insertions_since_last_commit = insertions_since_last_commit + 1
+    if insertions_since_last_commit > 10000:
+        conn.commit()
+        insertions_since_last_commit = 0
+
+# some outputs of value have zero addresses.
+# will credit them to unique "dev null" pseudo-addresses.
+def devnull_address():
+    n = 0
+    while True:
+        yield "devnull_" + str(n).zfill(10)
+        n = n + 1
+
+def process_output(timestamp, tx_hash, output_number, _output):
+
     # don't know how to handle outputs mentioning more than 1 address at the moment
     if len(_output.addresses) == 1:
-        address = _output.addresses[0].address
+        process_transfer(_output.addresses[0].address, _output.value, tx_hash, output_number)
 
-        c.execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?)', (tx_hash, output_number, address, _output.value))
-        total_outputs_inserted = total_outputs_inserted + 1
-
-        # update balance of address
-        c.execute('SELECT * FROM balances WHERE address = ?', (address,))
-        result = c.fetchone()
-        # print(result)
-        new_amount = 0
-        if result != None:
-            # print("Found previous balance %s" % (result,))
-            new_amount = result[1] + _output.value
-
-            # if result[0] == timestamp.isoformat():
-            c.execute('UPDATE balances SET amount = ? WHERE address = ?', (new_amount, address))
-        else:
-            try:
-                c.execute('INSERT INTO balances VALUES(?, ?)', (address, new_amount))
-            except sqlite3.IntegrityError as e:
-                print(e)
-                print("while trying to insert %s" % ((address, new_amount),))
-                commit_db_and_exit()
-
-        insertions_since_last_commit = insertions_since_last_commit + 1
-        if insertions_since_last_commit > 10000:
-            conn.commit()
-            insertions_since_last_commit = 0
     elif len(_output.addresses) == 0:
         if _output.value != 0:
             print("Info: 0 address output. tx=%s output_number=%s output=%s" % (tx_hash, output_number, _output))
             print("...of value = %s satoshis" % (_output.value))
-            print("...quitting, we should handle this right?")
-            commit_db_and_exit()
+            pseudo_address = devnull_address.next()
+            print("...crediting to " + pseudo_address + " LOL")
+            process_transfer(pseudo_address, _output.value, tx_hash, output_number)
+            # print("...quitting, we should handle this right?")
+            # commit_db_and_exit()
     else:
         print("multi address output")
         print(_output.addresses)
         print("don't know how to handle that, quitting")
         commit_db_and_exit()
+
 
 def process_input(_input):
     # print(_input)
@@ -99,10 +128,18 @@ def get_number_of_unspent_outputs():
 # Instantiate the Blockchain by giving the path to the directory 
 # containing the .blk files created by bitcoind
 tx_index = 0
+print("Initializing blockchain at " + sys.argv[1])
 blockchain = Blockchain(sys.argv[1])
-blocks = sorted(list(blockchain.get_unordered_blocks()), key=attrgetter('header.timestamp'))
+print("Iniitialized. Loading blocks...")
+unordered_blocks = []
+for b, block in enumerate(blockchain.get_unordered_blocks()):
+    unordered_blocks.append(block)
+    print("Loaded " + str(b) + " blocks", end="\r")
+print("Loaded all blocks. Sorting by time...")
+blocks = sorted(unordered_blocks, key=attrgetter('header.timestamp'))
+print("Sorted.")
 for block_number, block in enumerate(blocks):
-    print("block %s / %s: %s" % (block_number, len(blocks), block.header.timestamp.isoformat(),))
+    # print("block %s / %s: %s" % (block_number, len(blocks), block.header.timestamp.isoformat(),))
 
     for tx in block.transactions:
 
@@ -131,7 +168,9 @@ for block_number, block in enumerate(blocks):
         # in the long run, e.g. even after everything is spent
         
         for no, output in enumerate(tx.outputs):
-            store_output(block.header.timestamp, tx.hash, no, output)
+            if tx.hash == "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599":
+                print("processing tx d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599 output #" + str(no))
+            process_output(block.header.timestamp, tx.hash, no, output)
             # print("tx=%s outputno=%d type=%s value=%s" % (tx.hash, no, output.addresses, output.value))
         
         tx_index = tx_index + 1
