@@ -97,7 +97,7 @@ def process_output(timestamp, tx_hash, output_number, _output):
         if _output.value != 0:
             print("Info: 0 address output. tx=%s output_number=%s output=%s" % (tx_hash, output_number, _output))
             print("...of value = %s satoshis" % (_output.value))
-            pseudo_address = devnull_address.next()
+            pseudo_address = devnull_address()
             print("...crediting to " + pseudo_address + " LOL")
             process_transfer(pseudo_address, _output.value, tx_hash, output_number)
             # print("...quitting, we should handle this right?")
