@@ -22,7 +22,7 @@ if result == None:
     
     print("Creating unspent_outputs table...")
     c.execute('''CREATE TABLE unspent_outputs
-                 (tx_hash text, output_number int, address text, amount int)''')
+                 (tx_hash text, output_number int, address text, amount int, multi_address int)''')
     c.execute('CREATE UNIQUE INDEX tx_output ON unspent_outputs (tx_hash, output_number);')
 
     print("Creating balances table...")
@@ -47,15 +47,15 @@ signal.signal(signal.SIGINT, signal_handler)
 insertions_since_last_commit = 0
 total_outputs_inserted = 0
 
-def process_transfer(destination_address, value, tx_hash, output_number):
+def process_transfer(destination_address, value, tx_hash, output_number, multi_address = False):
     global insertions_since_last_commit
     global total_outputs_inserted
 
     address = destination_address
 
-    row = (tx_hash, output_number, address, value)
+    row = (tx_hash, output_number, address, value, multi_address)
     try:
-        c.execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?)', row)
+        c.execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?, ?)', row)
     except sqlite3.IntegrityError as e:
         print(e)
         print("WARNING: ignoring transaction with duplicate hash. should be extremely rare. see https://bitcoin.stackexchange.com/questions/11999/can-the-outputs-of-transactions-with-duplicate-hashes-be-spent")
@@ -117,10 +117,19 @@ def process_output(timestamp, tx_hash, output_number, _output):
             # print("...quitting, we should handle this right?")
             # commit_db_and_exit()
     else:
-        print("multi address output")
+        print("multi address output. depositing to all addresses and flagging outputs as multi address")
         print(_output.addresses)
-        print("don't know how to handle that, quitting")
-        commit_db_and_exit()
+        print("Value:")
+        print(_output.value)
+        print("Type:")
+        print(_output.type)
+
+        for output_address in _output.addresses:
+            process_transfer(output_address.address, _output.value, tx_hash, output_number, multi_address=True)
+
+        # print("don't know how to handle that, quitting")
+        # commit_db_and_exit()
+
 
 
 def process_input(_input):
