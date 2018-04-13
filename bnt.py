@@ -6,9 +6,16 @@ from operator import attrgetter
 
 import sqlite3
 
-# conn = sqlite3.connect('book.sqlite3')
-conn = sqlite3.connect(':memory:')
-c = conn.cursor()
+conn = None
+c = None
+def open_db():
+    global conn
+    global c
+    conn = sqlite3.connect('transactions.sqlite3')
+    #conn = sqlite3.connect(':memory:')
+    c = conn.cursor()
+open_db()
+
 c.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='unspent_outputs';''')
 result = c.fetchone()
 if result == None:
@@ -77,6 +84,10 @@ def process_transfer(destination_address, value, tx_hash, output_number):
     insertions_since_last_commit = insertions_since_last_commit + 1
     if insertions_since_last_commit > 10000:
         conn.commit()
+        # will closing and re-opening plug a memory leak?
+        # conn.close()
+        # open_db()
+        # print("Closed and re-opened db")
         insertions_since_last_commit = 0
 
 # some outputs of value have zero addresses.
@@ -142,12 +153,20 @@ for b, block in enumerate(blockchain.get_unordered_blocks()):
 total_blocks = len(unordered_blocks)
 print("Loaded all " + str(total_outputs_inserted) + " blocks. Sorting by time...")
 blocks = sorted(unordered_blocks, key=attrgetter('header.timestamp'))
+unordered_blocks = None
 print("Sorted.")
 
 tx_count = 0
 output_count = 0
 
-for block_number, block in enumerate(blocks):
+block_number = 0
+
+# from pympler.tracker import SummaryTracker
+# tracker = SummaryTracker()
+
+while len(blocks) > 0:
+    block = blocks.pop(0)
+# for block_number, block in enumerate(blocks):
     # print("block %s / %s: %s" % (block_number, len(blocks), block.header.timestamp.isoformat(),))
 
     for tx in block.transactions:
@@ -189,5 +208,11 @@ for block_number, block in enumerate(blocks):
         if tx_index % 1000 == 0:
             percent = round(100 * block_number / total_blocks)
             print("%s%% done. unspent outputs %s / %s total outputs" % (percent, get_number_of_unspent_outputs(), total_outputs_inserted), end="\r")
+            
+    # if(block_number % 1000 == 0):
+    #     print("Finished block " + str(block_number))
+    #     tracker.print_diff()
+
+    block_number = block_number + 1
 
 print("Processed %s transactions and %s outputs." % (tx_count, output_count))
