@@ -72,7 +72,7 @@ def process_transfer(destination_address, value, tx_hash, output_number, multi_a
     total_outputs_inserted = total_outputs_inserted + 1
 
     # update balance of address
-    query_execute('SELECT * FROM balances WHERE address = ?', (address,), explain=True)
+    query_execute('SELECT * FROM balances WHERE address = ?', (address,), explain=False)
     result = c.fetchone()
     # print(result)
     new_amount = 0
@@ -81,7 +81,7 @@ def process_transfer(destination_address, value, tx_hash, output_number, multi_a
         new_amount = result[1] + value
 
         # if result[0] == timestamp.isoformat():
-        query_execute('UPDATE balances SET amount = ? WHERE address = ?', (new_amount, address), explain=True)
+        query_execute('UPDATE balances SET amount = ? WHERE address = ?', (new_amount, address), explain=False)
     else:
         try:
             query_execute('INSERT INTO balances VALUES(?, ?)', (address, new_amount))
@@ -143,16 +143,16 @@ def process_output(timestamp, tx_hash, output_number, _output):
 
 def process_input(_input):
     # print(_input)
-    query_execute('SELECT address, amount FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index), explain=True)
+    query_execute('SELECT address, amount FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index), explain=False)
     result = c.fetchone()
     # print(result)
     if result != None:
         # print("Found %s" % (result,))
         # an output can only be spent through an input once! we can remove this row!
-        query_execute('DELETE FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index), explain=True)
+        query_execute('DELETE FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index), explain=False)
 
 def get_number_of_unspent_outputs():
-    query_execute('SELECT COUNT(*) FROM unspent_outputs', explain=True)
+    query_execute('SELECT COUNT(*) FROM unspent_outputs', explain=False)
     result = c.fetchone()[0]
     # print(result)
     return result
