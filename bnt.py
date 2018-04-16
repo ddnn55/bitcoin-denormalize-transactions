@@ -16,19 +16,28 @@ def open_db():
     c = conn.cursor()
 open_db()
 
-c.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='unspent_outputs';''')
+def query_execute(query, args=(), explain=False):
+    global c
+    if explain:
+        explain_query = 'EXPLAIN QUERY PLAN ' + query
+        c.execute(explain_query, args)
+        print("explanation of " + query)
+        print(c.fetchone())
+    c.execute(query, args)
+
+query_execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='unspent_outputs';''')
 result = c.fetchone()
 if result == None:
     
     print("Creating unspent_outputs table...")
-    c.execute('''CREATE TABLE unspent_outputs
+    query_execute('''CREATE TABLE unspent_outputs
                  (tx_hash text, output_number int, address text, amount int, multi_address int)''')
-    c.execute('CREATE UNIQUE INDEX tx_output ON unspent_outputs (tx_hash, output_number);')
+    query_execute('CREATE UNIQUE INDEX tx_output ON unspent_outputs (tx_hash, output_number);')
 
     print("Creating balances table...")
-    c.execute('''CREATE TABLE balances
+    query_execute('''CREATE TABLE balances
                  (address text, amount int)''')
-    c.execute('CREATE UNIQUE INDEX point ON balances (address);')
+    query_execute('CREATE UNIQUE INDEX point ON balances (address);')
 
 def commit_db_and_exit():
     conn.commit()
@@ -55,7 +64,7 @@ def process_transfer(destination_address, value, tx_hash, output_number, multi_a
 
     row = (tx_hash, output_number, address, value, multi_address)
     try:
-        c.execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?, ?)', row)
+        query_execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?, ?)', row)
     except sqlite3.IntegrityError as e:
         print(e)
         print("WARNING: ignoring transaction with duplicate hash. should be extremely rare. see https://bitcoin.stackexchange.com/questions/11999/can-the-outputs-of-transactions-with-duplicate-hashes-be-spent")
@@ -63,7 +72,7 @@ def process_transfer(destination_address, value, tx_hash, output_number, multi_a
     total_outputs_inserted = total_outputs_inserted + 1
 
     # update balance of address
-    c.execute('SELECT * FROM balances WHERE address = ?', (address,))
+    query_execute('SELECT * FROM balances WHERE address = ?', (address,), explain=True)
     result = c.fetchone()
     # print(result)
     new_amount = 0
@@ -72,10 +81,10 @@ def process_transfer(destination_address, value, tx_hash, output_number, multi_a
         new_amount = result[1] + value
 
         # if result[0] == timestamp.isoformat():
-        c.execute('UPDATE balances SET amount = ? WHERE address = ?', (new_amount, address))
+        query_execute('UPDATE balances SET amount = ? WHERE address = ?', (new_amount, address), explain=True)
     else:
         try:
-            c.execute('INSERT INTO balances VALUES(?, ?)', (address, new_amount))
+            query_execute('INSERT INTO balances VALUES(?, ?)', (address, new_amount))
         except sqlite3.IntegrityError as e:
             print(e)
             print("while trying to insert %s" % ((address, new_amount),))
@@ -134,16 +143,16 @@ def process_output(timestamp, tx_hash, output_number, _output):
 
 def process_input(_input):
     # print(_input)
-    c.execute('SELECT address, amount FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index))
+    query_execute('SELECT address, amount FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index), explain=True)
     result = c.fetchone()
     # print(result)
     if result != None:
         # print("Found %s" % (result,))
         # an output can only be spent through an input once! we can remove this row!
-        c.execute('DELETE FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index))
+        query_execute('DELETE FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index), explain=True)
 
 def get_number_of_unspent_outputs():
-    c.execute('SELECT COUNT(*) FROM unspent_outputs')
+    query_execute('SELECT COUNT(*) FROM unspent_outputs', explain=True)
     result = c.fetchone()[0]
     # print(result)
     return result
@@ -217,6 +226,8 @@ while len(blocks) > 0:
         if tx_index % 1000 == 0:
             percent = round(100 * block_number / total_blocks)
             print("%s%% done. unspent outputs %s / %s total outputs" % (percent, get_number_of_unspent_outputs(), total_outputs_inserted), end="\r")
+        
+        print("--------------------------------------------\n\n\n")
             
     # if(block_number % 1000 == 0):
     #     print("Finished block " + str(block_number))
