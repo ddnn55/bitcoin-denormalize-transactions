@@ -61,7 +61,7 @@ signal.signal(signal.SIGINT, signal_handler)
 insertions_since_last_commit = 0
 total_outputs_inserted = 0
 
-def process_transfer(timestamp, from_addresses, to_address, value, tx_hash, output_number, multi_address = False):
+def process_transfer(timestamp, inputs, to_address, value, tx_hash, output_number, multi_address = False):
     global insertions_since_last_commit
     global total_outputs_inserted
 
@@ -87,6 +87,13 @@ def process_transfer(timestamp, from_addresses, to_address, value, tx_hash, outp
 
         # if result[0] == timestamp.isoformat():
         query_execute('UPDATE balances SET amount = ? WHERE address = ?', (to_balance, address), explain=False)
+        
+        # debit from accounts
+        for (from_address, amount) in inputs:
+            query_execute('SELECT * FROM balances WHERE address = ?', (from_address,), explain=False)
+            balance = c.fetchone()[1]
+            query_execute('UPDATE balances SET amount = ? WHERE address = ?', (balance - amount, address), explain=False)
+            
     else:
         try:
             query_execute('INSERT INTO balances VALUES(?, ?)', (address, to_balance))
@@ -96,12 +103,12 @@ def process_transfer(timestamp, from_addresses, to_address, value, tx_hash, outp
             commit_db_and_exit()
     print(json.dumps([
         timestamp.isoformat(),
-        from_addresses,
+        inputs,
         to_address,
-        value,
+        # value,
         to_balance
     ]))
-    # print("%s,%s,%s,%s,%s" % (timestamp.isoformat(), from_addresses, to_address, value, to_balance))
+    # print("%s,%s,%s,%s,%s" % (timestamp.isoformat(), inputs, to_address, value, to_balance))
 
 
     # periodically flush DB
@@ -123,13 +130,13 @@ def make_devnull_address_generator():
         n = n + 1
 devnull_address = make_devnull_address_generator()
 
-def process_output(timestamp, from_addresses, tx_hash, output_number, _output):
+def process_output(timestamp, inputs, tx_hash, output_number, _output):
 
     global devnull_address
 
     # don't know how to handle outputs mentioning more than 1 address at the moment
     if len(_output.addresses) == 1:
-        process_transfer(timestamp, from_addresses, _output.addresses[0].address, _output.value, tx_hash, output_number)
+        process_transfer(timestamp, inputs, _output.addresses[0].address, _output.value, tx_hash, output_number)
 
     elif len(_output.addresses) == 0:
         if _output.value != 0:
@@ -137,7 +144,7 @@ def process_output(timestamp, from_addresses, tx_hash, output_number, _output):
             eprint("...of value = %s satoshis" % (_output.value))
             pseudo_address = next(devnull_address)
             eprint("...crediting to " + pseudo_address + " LOL")
-            process_transfer(timestamp, from_addresses, pseudo_address, _output.value, tx_hash, output_number)
+            process_transfer(timestamp, inputs, pseudo_address, _output.value, tx_hash, output_number)
             # eprint("...quitting, we should handle this right?")
             # commit_db_and_exit()
     else:
@@ -149,7 +156,7 @@ def process_output(timestamp, from_addresses, tx_hash, output_number, _output):
         eprint(_output.type)
 
         for output_address in _output.addresses:
-            process_transfer(timestamp, from_addresses, output_address.address, _output.value, tx_hash, output_number, multi_address=True)
+            process_transfer(timestamp, inputs, output_address.address, _output.value, tx_hash, output_number, multi_address=True)
 
         # eprint("don't know how to handle that, quitting")
         # commit_db_and_exit()
@@ -166,7 +173,7 @@ def process_input(_input):
         # an output can only be spent through an input once! we can remove this row!
         query_execute('DELETE FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index), explain=False)
         # eprint(result[0])
-        return result[0]
+        return result
     else:
         return None
 
@@ -220,12 +227,12 @@ while len(blocks) > 0:
         # tx=66f701374a05702aa1ab920486cfc1b7a1f643b6ed75c04f2583d412f12ff88b outputno=2 type=[Address(addr=1DiUJ9PXnump3KHsjc1qsp3E3LUbPvAxR4)] value=7574557
         # tx=635745100dc559787dc3b09bd31a62155084dc582aff741debb18828b91a8ec0 input_num=0 input=Input(66f701374a05702aa1ab920486cfc1b7a1f643b6ed75c04f2583d412f12ff88b,2)
 
-        from_addresses = []
+        inputs = []
         # eprint("input addresses:")
         for no, _input in enumerate(tx.inputs):
-            input_address = process_input(_input)
-            if input_address != None:
-                from_addresses.append(input_address)
+            address_and_amount = process_input(_input)
+            if address_and_amount != None:
+                inputs.append(address_and_amount)
                 # eprint(input_address)
             # eprint("tx=%s input_num=%s input=%s" % (tx.hash, no, _input))
 
@@ -245,7 +252,7 @@ while len(blocks) > 0:
             output_count = output_count + 1
             if tx.hash == "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599":
                 eprint("processing tx d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599 output #" + str(no))
-            process_output(block.header.timestamp, from_addresses, tx.hash, no, output)
+            process_output(block.header.timestamp, inputs, tx.hash, no, output)
             # eprint("tx=%s outputno=%d type=%s value=%s" % (tx.hash, no, output.addresses, output.value))
         
         tx_index = tx_index + 1
