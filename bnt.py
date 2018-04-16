@@ -229,7 +229,7 @@ while len(blocks) > 0:
             percent = round(100 * block_number / total_blocks)
             print("%s%% done. unspent outputs %s / %s total outputs" % (percent, get_number_of_unspent_outputs(), total_outputs_inserted), end="\r")
         
-        print("--------------------------------------------\n\n\n")
+        # print("--------------------------------------------\n\n\n")
             
     # if(block_number % 1000 == 0):
     #     print("Finished block " + str(block_number))
