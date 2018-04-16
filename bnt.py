@@ -187,6 +187,8 @@ while len(blocks) > 0:
 # for block_number, block in enumerate(blocks):
     # print("block %s / %s: %s" % (block_number, len(blocks), block.header.timestamp.isoformat(),))
 
+    print(block.header.timestamp.isoformat())
+
     for tx in block.transactions:
 
         tx_count = tx_count + 1
