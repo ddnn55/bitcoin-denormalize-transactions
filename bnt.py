@@ -77,6 +77,8 @@ def process_output(output, output_number, tx_hash):
         # offer more features like multi sig required, or multi sigs capable
         eprint("WARNING: %s output %s is multi-address. We don't accurately handle multi-address output. If output is spent, balances of these addresses will be too high, except for the balance of the address that spent it." % (tx_hash, output_number))
 
+    addresses = []
+
     for address in output.addresses:
         address = address.address
         row = (tx_hash, output_number, address, value, multi_address)
@@ -110,6 +112,8 @@ def process_output(output, output_number, tx_hash):
                 eprint("while trying to insert %s" % ((address, to_balance),))
                 commit_db_and_exit()
         
+        addresses.append((address, to_balance))
+
         # periodically flush DB
         insertions_since_last_commit = insertions_since_last_commit + 1
         if insertions_since_last_commit > 10000:
@@ -119,6 +123,8 @@ def process_output(output, output_number, tx_hash):
             # open_db()
             # eprint("Closed and re-opened db")
             insertions_since_last_commit = 0
+
+    return (addresses, output.value)
 
     
 def process_transfer(timestamp, debits, _credits, value, tx_hash):
@@ -264,21 +270,22 @@ while len(blocks) > 0:
         num_outputs_hist[tx.n_outputs] = num_outputs_hist[tx.n_outputs] + 1
 
         _credits = []
+        transaction_value = 0
         for no, output in enumerate(tx.outputs):
             output_count = output_count + 1
         #     if tx.hash == "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599":
         #         eprint("processing tx d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599 output #" + str(no))
-            process_output(output, no, tx.hash)
+            _credit = process_output(output, no, tx.hash)
+            transaction_value = transaction_value + _credit[1]
             # process_output(block.header.timestamp, inputs, tx.hash, no, output)
-            num_outputs = 0
-            for address in output.addresses:
-                _credits.append((address.address, output.value))
-                num_outputs = num_outputs + 1
+            _credits.append(_credit)
             # eprint("tx=%s outputno=%d type=%s value=%s" % (tx.hash, no, output.addresses, output.value))
         
-        value = sum([credit[1] for credit in _credits])
+        # eprint("_credits:")
+        # eprint(_credits)
+        # value = sum([credit[1] for credit in _credits])
 
-        process_transfer(block.header.timestamp, debits, _credits, value, tx.hash)
+        process_transfer(block.header.timestamp, debits, _credits, transaction_value, tx.hash)
         # process_transfer(block.header.timestamp, debits, _credits, value, tx_hash, output_number, multi_address = False)
 
         tx_index = tx_index + 1
