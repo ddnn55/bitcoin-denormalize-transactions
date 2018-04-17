@@ -61,98 +61,105 @@ signal.signal(signal.SIGINT, signal_handler)
 insertions_since_last_commit = 0
 total_outputs_inserted = 0
 
-def process_transfer(timestamp, inputs, to_address, value, tx_hash, output_number, multi_address = False):
+def process_output(output, output_number, tx_hash):
     global insertions_since_last_commit
     global total_outputs_inserted
 
-    address = to_address
+    value = output.value
 
-    row = (tx_hash, output_number, address, value, multi_address)
-    try:
-        query_execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?, ?)', row)
-    except sqlite3.IntegrityError as e:
-        eprint(e)
-        eprint("WARNING: ignoring transaction with duplicate hash. should be extremely rare. see https://bitcoin.stackexchange.com/questions/11999/can-the-outputs-of-transactions-with-duplicate-hashes-be-spent")
-        eprint(row)
-    total_outputs_inserted = total_outputs_inserted + 1
+    multi_address = len(output.addresses) > 1
+    if multi_address:
+        # well, it's a multi-address output. strictly speaking,
+        # we should debit all these addresses if this output
+        # is ever spent. this does happen, although seems infrequent
+        # anecdotally in the first 100 blk files.
+        # could become more frequent in subsequent blk files as service providers
+        # offer more features like multi sig required, or multi sigs capable
+        eprint("WARNING: %s output %s is multi-address. We don't accurately handle multi-address output. If output is spent, balances of these addresses will be too high, except for the balance of the address that spent it." % (tx_hash, output_number))
 
-    # update balance of address
-    query_execute('SELECT * FROM balances WHERE address = ?', (address,), explain=False)
-    result = c.fetchone()
-    # eprint(result)
-    to_balance = None
-    if result != None:
-        # eprint("Found previous balance %s" % (result,))
-        to_balance = result[1] + value
-
-        # if result[0] == timestamp.isoformat():
-        query_execute('UPDATE balances SET amount = ? WHERE address = ?', (to_balance, address), explain=False)
-            
-    else:
-        # no previous balance record. set balance to value
-        to_balance = value
+    for address in output.addresses:
+        address = address.address
+        row = (tx_hash, output_number, address, value, multi_address)
         try:
-            query_execute('INSERT INTO balances VALUES(?, ?)', (address, to_balance))
+            query_execute('INSERT INTO unspent_outputs VALUES(?, ?, ?, ?, ?)', row)
         except sqlite3.IntegrityError as e:
             eprint(e)
-            eprint("while trying to insert %s" % ((address, to_balance),))
-            commit_db_and_exit()
+            eprint("WARNING: ignoring transaction with duplicate hash. should be extremely rare. see https://bitcoin.stackexchange.com/questions/11999/can-the-outputs-of-transactions-with-duplicate-hashes-be-spent")
+            eprint(row)
+        total_outputs_inserted = total_outputs_inserted + 1
+
+        # update balance of address
+        query_execute('SELECT * FROM balances WHERE address = ?', (address,), explain=False)
+        result = c.fetchone()
+        # eprint(result)
+        to_balance = None
+        if result != None:
+            # eprint("Found previous balance %s" % (result,))
+            to_balance = result[1] + value
+
+            # if result[0] == timestamp.isoformat():
+            query_execute('UPDATE balances SET amount = ? WHERE address = ?', (to_balance, address), explain=False)
+                
+        else:
+            # no previous balance record. set balance to value
+            to_balance = value
+            try:
+                query_execute('INSERT INTO balances VALUES(?, ?)', (address, to_balance))
+            except sqlite3.IntegrityError as e:
+                eprint(e)
+                eprint("while trying to insert %s" % ((address, to_balance),))
+                commit_db_and_exit()
+        
+        # periodically flush DB
+        insertions_since_last_commit = insertions_since_last_commit + 1
+        if insertions_since_last_commit > 10000:
+            conn.commit()
+            # will closing and re-opening plug a memory leak?
+            # conn.close()
+            # open_db()
+            # eprint("Closed and re-opened db")
+            insertions_since_last_commit = 0
+
+    
+def process_transfer(timestamp, debits, _credits, value, tx_hash):
     print(json.dumps([
         timestamp.isoformat(),
-        inputs,
-        to_address,
+        debits,
+        _credits,
         value,
-        to_balance
+        # tx_hash
     ]))
     # print("%s,%s,%s,%s,%s" % (timestamp.isoformat(), inputs, to_address, value, to_balance))
 
 
-    # periodically flush DB
-    insertions_since_last_commit = insertions_since_last_commit + 1
-    if insertions_since_last_commit > 10000:
-        conn.commit()
-        # will closing and re-opening plug a memory leak?
-        # conn.close()
-        # open_db()
-        # eprint("Closed and re-opened db")
-        insertions_since_last_commit = 0
+# def process_output(timestamp, inputs, tx_hash, output_number, _output):
 
-# some outputs of value have zero addresses.
-# will credit them to unique "dev null" pseudo-addresses.
-def make_devnull_address_generator():
-    n = 0
-    while True:
-        yield "devnull_" + str(n).zfill(10)
-        n = n + 1
-devnull_address = make_devnull_address_generator()
+    # global devnull_address
 
-def process_output(timestamp, inputs, tx_hash, output_number, _output):
+    # if len(_output.addresses) == 1:
+    #     process_transfer(timestamp, inputs, _output.addresses[0].address, _output.value, tx_hash, output_number)
 
-    global devnull_address
+    # elif len(_output.addresses) == 0:
+    #     if _output.value != 0:
+    #         eprint("Info: 0 address output. tx=%s output_number=%s output=%s" % (tx_hash, output_number, _output))
+    #         eprint("...of value = %s satoshis" % (_output.value))
+    #         pseudo_address = next(devnull_address)
+    #         eprint("...crediting to " + pseudo_address + " LOL")
+    #         process_transfer(timestamp, inputs, pseudo_address, _output.value, tx_hash, output_number)
+    #         # eprint("...quitting, we should handle this right?")
+    #         # commit_db_and_exit()
+    # else:
+    #     eprint("multi address output. depositing to all addresses and flagging outputs as multi address")
+    #     eprint(_output.addresses)
+    #     eprint("Value:")
+    #     eprint(_output.value)
+    #     eprint("Type:")
+    #     eprint(_output.type)
 
-    if len(_output.addresses) == 1:
-        process_transfer(timestamp, inputs, _output.addresses[0].address, _output.value, tx_hash, output_number)
+    #     for output_address in _output.addresses:
+    #         process_transfer(timestamp, inputs, output_address.address, _output.value, tx_hash, output_number, multi_address=True)
 
-    elif len(_output.addresses) == 0:
-        if _output.value != 0:
-            eprint("Info: 0 address output. tx=%s output_number=%s output=%s" % (tx_hash, output_number, _output))
-            eprint("...of value = %s satoshis" % (_output.value))
-            pseudo_address = next(devnull_address)
-            eprint("...crediting to " + pseudo_address + " LOL")
-            process_transfer(timestamp, inputs, pseudo_address, _output.value, tx_hash, output_number)
-            # eprint("...quitting, we should handle this right?")
-            # commit_db_and_exit()
-    else:
-        eprint("multi address output. depositing to all addresses and flagging outputs as multi address")
-        eprint(_output.addresses)
-        eprint("Value:")
-        eprint(_output.value)
-        eprint("Type:")
-        eprint(_output.type)
-
-        for output_address in _output.addresses:
-            process_transfer(timestamp, inputs, output_address.address, _output.value, tx_hash, output_number, multi_address=True)
-
+    
 
 
 
@@ -231,12 +238,12 @@ while len(blocks) > 0:
         # tx=66f701374a05702aa1ab920486cfc1b7a1f643b6ed75c04f2583d412f12ff88b outputno=2 type=[Address(addr=1DiUJ9PXnump3KHsjc1qsp3E3LUbPvAxR4)] value=7574557
         # tx=635745100dc559787dc3b09bd31a62155084dc582aff741debb18828b91a8ec0 input_num=0 input=Input(66f701374a05702aa1ab920486cfc1b7a1f643b6ed75c04f2583d412f12ff88b,2)
 
-        inputs = []
+        debits = []
         # eprint("input addresses:")
         for no, _input in enumerate(tx.inputs):
-            address_and_amount = process_input(_input)
-            if address_and_amount != None:
-                inputs.append(address_and_amount)
+            debit = process_input(_input)
+            if debit != None:
+                debits.append(debit)
                 # eprint(input_address)
             # eprint("tx=%s input_num=%s input=%s" % (tx.hash, no, _input))
 
@@ -256,13 +263,24 @@ while len(blocks) > 0:
             num_outputs_hist[tx.n_outputs] = 0
         num_outputs_hist[tx.n_outputs] = num_outputs_hist[tx.n_outputs] + 1
 
+        _credits = []
         for no, output in enumerate(tx.outputs):
             output_count = output_count + 1
-            if tx.hash == "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599":
-                eprint("processing tx d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599 output #" + str(no))
-            process_output(block.header.timestamp, inputs, tx.hash, no, output)
+        #     if tx.hash == "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599":
+        #         eprint("processing tx d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599 output #" + str(no))
+            process_output(output, no, tx.hash)
+            # process_output(block.header.timestamp, inputs, tx.hash, no, output)
+            num_outputs = 0
+            for address in output.addresses:
+                _credits.append((address.address, output.value))
+                num_outputs = num_outputs + 1
             # eprint("tx=%s outputno=%d type=%s value=%s" % (tx.hash, no, output.addresses, output.value))
         
+        value = sum([credit[1] for credit in _credits])
+
+        process_transfer(block.header.timestamp, debits, _credits, value, tx.hash)
+        # process_transfer(block.header.timestamp, debits, _credits, value, tx_hash, output_number, multi_address = False)
+
         tx_index = tx_index + 1
         if tx_index % 1000 == 0:
             percent = round(100 * block_number / total_blocks)
