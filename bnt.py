@@ -223,7 +223,7 @@ num_outputs_hist = {}
 # from pympler.tracker import SummaryTracker
 # tracker = SummaryTracker()
 
-print("time,from_address,to_address,amount_satoshis,to_balance")
+print("time,debits,credits,amount")
 
 while len(blocks) > 0:
     block = blocks.pop(0)
