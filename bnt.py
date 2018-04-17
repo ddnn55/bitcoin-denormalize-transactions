@@ -16,8 +16,8 @@ c = None
 def open_db():
     global conn
     global c
-    conn = sqlite3.connect('balances.sqlite3')
-    #conn = sqlite3.connect(':memory:')
+    # conn = sqlite3.connect('balances.sqlite3')
+    conn = sqlite3.connect(':memory:')
     c = conn.cursor()
 open_db()
 
@@ -80,21 +80,17 @@ def process_transfer(timestamp, inputs, to_address, value, tx_hash, output_numbe
     query_execute('SELECT * FROM balances WHERE address = ?', (address,), explain=False)
     result = c.fetchone()
     # eprint(result)
-    to_balance = 0
+    to_balance = None
     if result != None:
         # eprint("Found previous balance %s" % (result,))
         to_balance = result[1] + value
 
         # if result[0] == timestamp.isoformat():
         query_execute('UPDATE balances SET amount = ? WHERE address = ?', (to_balance, address), explain=False)
-        
-        # debit from accounts
-        for (from_address, amount) in inputs:
-            query_execute('SELECT * FROM balances WHERE address = ?', (from_address,), explain=False)
-            balance = c.fetchone()[1]
-            query_execute('UPDATE balances SET amount = ? WHERE address = ?', (balance - amount, address), explain=False)
             
     else:
+        # no previous balance record. set balance to value
+        to_balance = value
         try:
             query_execute('INSERT INTO balances VALUES(?, ?)', (address, to_balance))
         except sqlite3.IntegrityError as e:
@@ -105,7 +101,7 @@ def process_transfer(timestamp, inputs, to_address, value, tx_hash, output_numbe
         timestamp.isoformat(),
         inputs,
         to_address,
-        # value,
+        value,
         to_balance
     ]))
     # print("%s,%s,%s,%s,%s" % (timestamp.isoformat(), inputs, to_address, value, to_balance))
@@ -134,7 +130,6 @@ def process_output(timestamp, inputs, tx_hash, output_number, _output):
 
     global devnull_address
 
-    # don't know how to handle outputs mentioning more than 1 address at the moment
     if len(_output.addresses) == 1:
         process_transfer(timestamp, inputs, _output.addresses[0].address, _output.value, tx_hash, output_number)
 
@@ -158,8 +153,6 @@ def process_output(timestamp, inputs, tx_hash, output_number, _output):
         for output_address in _output.addresses:
             process_transfer(timestamp, inputs, output_address.address, _output.value, tx_hash, output_number, multi_address=True)
 
-        # eprint("don't know how to handle that, quitting")
-        # commit_db_and_exit()
 
 
 
@@ -169,10 +162,17 @@ def process_input(_input):
     result = c.fetchone()
     # eprint(result)
     if result != None:
+        (address, amount) = result
         # eprint("Found %s" % (result,))
         # an output can only be spent through an input once! we can remove this row!
         query_execute('DELETE FROM unspent_outputs WHERE tx_hash=? AND output_number=?', (_input.transaction_hash, _input.transaction_index), explain=False)
         # eprint(result[0])
+
+        # debit account
+        query_execute('SELECT * FROM balances WHERE address = ?', (address,), explain=False)
+        balance = c.fetchone()[1]
+        query_execute('UPDATE balances SET amount = ? WHERE address = ?', (balance - amount, address), explain=False)
+
         return result
     else:
         return None
@@ -205,6 +205,8 @@ output_count = 0
 
 block_number = 0
 
+num_outputs_hist = {}
+
 # from pympler.tracker import SummaryTracker
 # tracker = SummaryTracker()
 
@@ -214,6 +216,8 @@ while len(blocks) > 0:
     block = blocks.pop(0)
 # for block_number, block in enumerate(blocks):
     # eprint("block %s / %s: %s" % (block_number, len(blocks), block.header.timestamp.isoformat(),))
+
+    # sys.stderr.write('block hash: ' + block.hash + ' ' + str(block.n_transactions) + '\n')
 
     for tx in block.transactions:
 
@@ -248,6 +252,10 @@ while len(blocks) > 0:
         # each other, and maybe wallet clients do lots of stuff to retain privacy
         # in the long run, e.g. even after everything is spent
         
+        if not tx.n_outputs in num_outputs_hist:
+            num_outputs_hist[tx.n_outputs] = 0
+        num_outputs_hist[tx.n_outputs] = num_outputs_hist[tx.n_outputs] + 1
+
         for no, output in enumerate(tx.outputs):
             output_count = output_count + 1
             if tx.hash == "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599":
@@ -258,7 +266,9 @@ while len(blocks) > 0:
         tx_index = tx_index + 1
         if tx_index % 1000 == 0:
             percent = round(100 * block_number / total_blocks)
-            eprint("%s%% done. unspent outputs %s / %s total outputs" % (percent, get_number_of_unspent_outputs(), total_outputs_inserted), end="\r")
+            eprint("\r%s%%" % (percent,), end="")
+            # eprint("\r%s%% done. unspent outputs %s / %s total outputs; %s" % (percent, get_number_of_unspent_outputs(), total_outputs_inserted, num_outputs_hist), end="")
+            # eprint(num_outputs_hist)
         
         # eprint("--------------------------------------------\n\n\n")
             
